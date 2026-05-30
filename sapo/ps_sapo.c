@@ -16,6 +16,7 @@
 #define __NR_pidfd_send_signal 424
 #endif
 
+// fns auxiliares
 const char* get_username(uid_t uid) {
     struct passwd *pw = getpwuid(uid);
     if (pw){
@@ -32,7 +33,7 @@ int ver_pid(const char *str) {
     }
     return 1;
 }
-
+// ps
 void ps_exec(int vall, const char *pattern) {
     struct dirent *entry;
     uid_t my_uid = getuid();
@@ -67,43 +68,43 @@ void ps_exec(int vall, const char *pattern) {
             fp = fopen(path, "r");
 
             char line[256];
-            char process_name[256] = "";
-            uid_t uid_process = -1;
+            char process_name[256];
+            uid_t uid_process;
 
-            while (fgets(line, sizeof(line), fp)) {
-                if (strncmp(line, "Name:", 5) == 0) {
+            while (fgets(line, sizeof(line), fp)) { // leemos dentro de status
+                if (strncmp(line, "Name:", 5) == 0) {  // buscamos el nombre
                     sscanf(line, "Name:\t%s", process_name);
-                } else if (strncmp(line, "Uid:", 4) == 0) {
+                } else if (strncmp(line, "Uid:", 4) == 0) { // buscamos el uid del proceso
                     sscanf(line, "Uid:\t%d", &uid_process);
                 }
             }
             fclose(fp);
 
             if (!vall && uid_process != my_uid) { //aquí se apĺica la flag -a 
-                continue; 
+                continue; // si entra al if continúa con el sig proceso
             }
 
-            snprintf(path, sizeof(path), "/proc/%s/cmdline", entry->d_name);
+            snprintf(path, sizeof(path), "/proc/%s/cmdline", entry->d_name); // para buscar el comando invocado
             fp = fopen(path, "r"); // abrimos el archivo cmdline
-            char cmd[512] = ""; 
+            char cmd[512]; 
             
             if (fp) {
-                size_t read_bytes = fread(cmd, 1, sizeof(cmd) - 1, fp);
+                size_t read_bytes = fread(cmd, 1, sizeof(cmd) - 1, fp); // leemos el 1 byte del archivo
                 fclose(fp);
                 
                 if (read_bytes > 0) {
                     for (size_t i = 0; i < read_bytes - 1; i++) {
-                        if (cmd[i] == '\0') cmd[i] = ' ';
+                        if (cmd[i] == '\0'){ // ya que linux separa cada palabra con \0
+                            cmd[i] = ' '; // reemplazamos por espacio vacío
+                        } 
                     }
-                    cmd[read_bytes] = '\0';
-                } else {
-                    strcpy(cmd, process_name);
-                }
+                    cmd[read_bytes] = '\0'; // marcamos el final 
+                } 
             }
             // find
             if (regex_exec) {
-                int name_pattern = (regexec(&regex, process_name, 0, NULL, 0) == 0);
-                int cmd_pattern = (regexec(&regex, cmd, 0, NULL, 0) == 0);
+                int name_pattern = (regexec(&regex, process_name, 0, NULL, 0) == 0); // comparamos el patron con el nombre del proceso
+                int cmd_pattern = (regexec(&regex, cmd, 0, NULL, 0) == 0); // comparamos el patron con el nombre del comando
 
                 if (!name_pattern && !cmd_pattern) {
                     continue;
@@ -125,7 +126,7 @@ void files_exec(const char *pid){
     // estoy asumiendo que es un pid válido, si no igual saltará el mensaje de error
     snprintf(path, sizeof(path), "/proc/%s/fd", pid);
 
-    DIR *direct = opendir(path);
+    DIR *direct = opendir(path); // abrimos el fd del pid entregado
     if(!direct){
         fprintf(stderr, "error: wrong PID\n");
         return;
@@ -134,14 +135,14 @@ void files_exec(const char *pid){
     printf("%-8s %-s\n", "PID", "FILE");
     printf("-------------------------------------------------------------------\n");
 
-    struct dirent *entry;
+    struct dirent *entry; 
     while ((entry = readdir(direct)) != NULL) {
         char symlink[1024];
         char real_path[1024];
 
-        snprintf(symlink, sizeof(symlink), "%s/%s", path, entry->d_name);
+        snprintf(symlink, sizeof(symlink), "%s/%s", path, entry->d_name); // construimos la ruta
 
-        ssize_t len = readlink(symlink, real_path, sizeof(real_path) - 1);
+        ssize_t len = readlink(symlink, real_path, sizeof(real_path) - 1); // leemos el texto que está dentro del link simbólico
         if (len != -1) {
             real_path[len] = '\0';
             printf("%-8s %-s\n", entry->d_name, real_path);
@@ -149,8 +150,7 @@ void files_exec(const char *pid){
     }
     closedir(direct);
 }
-// ports
-// función auxiliar que nos ayude a cruzar la información
+
 // ports
 // función auxiliar que nos ayude a cruzar la información
 int inodes_proc(char *process_name, size_t name_len, unsigned long inode){
@@ -236,8 +236,8 @@ void read_ports(const char *arch_root, const char *protocole_name) {
     // leemos las conexiones reales
     while (fgets(line, sizeof(line), file)) {
         unsigned int hex_port;
-        unsigned long inodo;
-        char ip_local_hex[64] = "";
+        unsigned long inodo = 0;
+        unsigned int ip;
         int flag_read;
 
         char line_copy[1024];
@@ -251,7 +251,7 @@ void read_ports(const char *arch_root, const char *protocole_name) {
             col++;
             // col 2 -> contiene "IP_LOCAL:PUERTO_HEX"
             if (col == 2) {
-                if (sscanf(token, "%[^:]:%X", ip_local_hex, &hex_port) == 2) {
+                if (sscanf(token, "%X:%X", &ip, &hex_port) == 2) {
                     flag_read = 1; 
                 }
             }
@@ -265,14 +265,22 @@ void read_ports(const char *arch_root, const char *protocole_name) {
         }
 
         
-        if (flag_read && inodo > 0) {
+        if (flag_read && inodo > 0) { // esto lo usamos para transformar la ip de formato hex a algo leible por humanos
+            unsigned char b1 = (ip & 0xFF);
+            unsigned char b2 = ((ip >> 8) & 0xFF);
+            unsigned char b3 = ((ip >> 16) & 0xFF);
+            unsigned char b4 = ((ip >> 24) & 0xFF);
+
+            char ip_final[64];
+            snprintf(ip_final, sizeof(ip_final), "%d.%d.%d.%d", b1, b2, b3, b4); // aquí reconstruimos la ip
+
             char process_name[256];
-            int pid = inodes_proc(process_name, sizeof(process_name), inodo);
+            int pid = inodes_proc(process_name, sizeof(process_name), inodo); // hacemos llamado a la fn aux para que enlace los inodos con sus ids respectivos
 
             if (pid != -1) {
-                printf("%-8s %-12u %-8d %-s\n", protocole_name, hex_port, pid, process_name);
+                printf("%-15s %-20s %-8d %-s\n", protocole_name, ip_final, pid, process_name);
             } else {
-                printf("%-8s %-12u %-8s %-s\n", protocole_name, hex_port, "-", "-");
+                printf("%-15s %-20s %-8s %-s\n", protocole_name, ip_final, "-", "-");
             }
         }
     }
@@ -280,8 +288,8 @@ void read_ports(const char *arch_root, const char *protocole_name) {
 }
 
 void ports_exec(void){
-    printf("%-8s %-12s %-8s %-s\n", "PROTO", "LOCAL_PORT", "PID", "PROCESS NAME");
-    printf("-----------------------------------------------------------\n");
+    printf("%-15s %-20s %-8s %-s\n", "PROTOCOLO", "LOCAL_ADDRESS", "PID", "PROCESS NAME");
+    printf("------------------------------------------------------------------------------------\n");
 
     // TCP
     read_ports("/proc/net/tcp", "TCP");
@@ -295,14 +303,14 @@ int signals(const char *signal){
     if(signal == NULL){
         return SIGTERM;
     }
-    if(ver_pid(signal)){
+    if(ver_pid(signal)){ //verificamos si la señal es un numero o string
         int num_signal = atoi(signal);
         if (num_signal >= 1 && num_signal <= 64){
             return num_signal;
         }
         return -1;
     }
-    const char *signals_name[] = {
+    const char *signals_name[] = { // diccionario con las señales
         "", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", 
         "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", 
         "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", 
@@ -310,14 +318,15 @@ int signals(const char *signal){
         "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"
     };
     
-    for (int i = 1; i <= 31; i++) {
+    for (int i = 1; i <= 31; i++) { // convertimos todas las señales a su número respectivo
         if (strcmp(signal, signals_name[i]) == 0) {
             return i;
         }
     }
 
     int offset = 0;
-    if (strncasecmp(signal, "SIGRTMIN", 8) == 0) {
+    // ej: SIGRTMIN+8
+    if (strncasecmp(signal, "SIGRTMIN", 8) == 0) { //aquí trabajamos con las señales especiales
         if (sscanf(signal + 8, "%d", &offset) == 1) {
             int result = SIGRTMIN + offset;
             if (result >= SIGRTMIN && result <= SIGRTMAX){
@@ -327,8 +336,8 @@ int signals(const char *signal){
         }
         return SIGRTMIN;
     }
-
-    if (strncasecmp(signal, "SIGRTMAX", 8) == 0) {
+    // ej: SIGRTMAX-8
+    if (strncasecmp(signal, "SIGRTMAX", 8) == 0) { //aquí trabajamos con las señales especiales
         if (sscanf(signal + 8, "%d", &offset) == 1) {
             int result = SIGRTMAX + offset;
             if (result >= SIGRTMIN && result <= SIGRTMAX){
@@ -348,20 +357,15 @@ void kill_exec(const char *pid, const char *signal){
         return;
     }
     
-    int pid_num = atoi(pid);
-    int signal_val = signals(signal);
+    int pid_num = atoi(pid); // convertimos el pid al entero
+    int signal_val = signals(signal); // convertimos la señal a su número respectivo
 
     if (signal_val == -1){
         fprintf(stderr, "error: signal '%s' not recognized.\n", signal);
         return;
     }
-
-    int pid_call = syscall(__NR_pidfd_open, pid_num, 0);
-    if (pid_call == -1) {
-        perror("error: pidfd_open failed");
-        return;
-    }
-
+    // llamada a sistema 
+    int pid_call = syscall(__NR_pidfd_open, pid_num, 0); 
     int value = syscall(__NR_pidfd_send_signal, pid_call, signal_val, NULL, 0);
     if (value == -1){
         perror("error: send signal failed");
